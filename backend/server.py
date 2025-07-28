@@ -200,18 +200,22 @@ async def move_card(move_request: MoveCardRequest):
 @api_router.get("/analytics/pipeline")
 async def get_pipeline_analytics():
     # Get all columns and cards
-    columns = await db.columns.find().to_list(1000)
-    cards = await db.cards.find().to_list(1000)
+    columns_data = await db.columns.find().to_list(1000)
+    cards_data = await db.cards.find().to_list(1000)
+    
+    # Convert to Pydantic models to ensure proper serialization
+    columns = [Column(**col) for col in columns_data]
+    cards = [Card(**card) for card in cards_data]
     
     # Calculate analytics
     column_stats = {}
     total_value = 0
     
     for column in columns:
-        column_cards = [c for c in cards if c["column_id"] == column["id"]]
-        column_value = sum(c.get("estimated_value", 0) for c in column_cards)
-        column_stats[column["id"]] = {
-            "title": column["title"],
+        column_cards = [c for c in cards if c.column_id == column.id]
+        column_value = sum(c.estimated_value for c in column_cards)
+        column_stats[column.id] = {
+            "title": column.title,
             "count": len(column_cards),
             "total_value": column_value
         }
@@ -221,7 +225,7 @@ async def get_pipeline_analytics():
         "column_stats": column_stats,
         "total_cards": len(cards),
         "total_pipeline_value": total_value,
-        "columns": columns
+        "columns": [col.dict() for col in columns]
     }
 
 # Initialize default board if none exists
