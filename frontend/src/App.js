@@ -687,7 +687,7 @@ const AnalyticsDashboard = ({ analytics, isDarkMode }) => {
     {
       title: "Total de Cards",
       value: analytics.total_cards,
-      icon: TargetIcon,
+      icon: ArrowTrendingUpIcon,
       color: "from-blue-500 to-blue-600",
       bgColor: "from-blue-50 to-blue-100 dark:from-blue-900/20 dark:to-blue-800/20"
     },
