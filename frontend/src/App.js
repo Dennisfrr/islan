@@ -700,7 +700,7 @@ const AnalyticsDashboard = ({ analytics, isDarkMode }) => {
     {
       title: "Ticket Médio",
       value: formatCurrency(analytics.total_pipeline_value / Math.max(analytics.total_cards, 1)),
-      icon: TrendingUpIcon,
+      icon: ArrowTrendingUpIcon,
       color: "from-orange-500 to-orange-600",
       bgColor: "from-orange-50 to-orange-100 dark:from-orange-900/20 dark:to-orange-800/20"
     },
