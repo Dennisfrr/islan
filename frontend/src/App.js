@@ -34,13 +34,13 @@ import {
   ExclamationCircleIcon,
   TrendingUpIcon,
   ChartBarIcon,
-  TargetIcon,
   MagnifyingGlassIcon,
   FunnelIcon,
   SunIcon,
   MoonIcon,
   Bars3Icon,
   XMarkIcon,
+  ArrowTrendingUpIcon,
 } from "@heroicons/react/24/outline";
 import {
   StarIcon,
