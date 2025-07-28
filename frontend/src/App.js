@@ -32,7 +32,6 @@ import {
   CalendarIcon,
   TagIcon,
   ExclamationCircleIcon,
-  TrendingUpIcon,
   ChartBarIcon,
   MagnifyingGlassIcon,
   FunnelIcon,
