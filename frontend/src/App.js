@@ -3,6 +3,9 @@ import "./App.css";
 import axios from "axios";
 import { motion, AnimatePresence } from "framer-motion";
 import toast, { Toaster } from 'react-hot-toast';
+import QRCode from 'react-qr-code';
+import { formatDistanceToNow } from 'date-fns';
+import { ptBR } from 'date-fns/locale';
 import {
   DndContext,
   DragOverlay,
@@ -40,11 +43,19 @@ import {
   Bars3Icon,
   XMarkIcon,
   ArrowTrendingUpIcon,
+  ChatBubbleLeftRightIcon,
+  CogIcon,
+  SignalIcon,
+  CheckCircleIcon,
+  ClockIcon as ClockIconOutline,
+  ExclamationTriangleIcon,
+  DevicePhoneMobileIcon,
 } from "@heroicons/react/24/outline";
 import {
   StarIcon,
   FireIcon,
   ClockIcon,
+  ChatBubbleLeftIcon,
 } from "@heroicons/react/24/solid";
 
 const BACKEND_URL = process.env.REACT_APP_BACKEND_URL;
@@ -98,60 +109,249 @@ const PriorityBadge = ({ priority }) => {
   const { color, icon: Icon, text } = config[priority] || config.medium;
 
   return (
-    <div className={`inline-flex items-center gap-1 px-2 py-1 rounded-full bg-gradient-to-r ${color} text-white text-xs font-semibold shadow-sm`}>
+    <div className={`inline-flex items-center gap-1 px-2 py-1 rounded-full text-xs font-medium bg-gradient-to-r ${color} text-white shadow-sm`}>
       <Icon className="w-3 h-3" />
-      <span>{text}</span>
+      {text}
     </div>
   );
 };
 
-// Date Chip Component
-const DateChip = ({ date }) => {
-  if (!date) return null;
+// Platform Status Badge Component
+const PlatformStatus = ({ platform, status, lastActivity }) => {
+  const platformConfig = {
+    whatsapp: { 
+      name: "WhatsApp", 
+      color: "bg-green-500", 
+      icon: "💬",
+      bgColor: "bg-green-50"
+    },
+    messenger: { 
+      name: "Messenger", 
+      color: "bg-blue-500", 
+      icon: "📧",
+      bgColor: "bg-blue-50"
+    },
+    email: { 
+      name: "Email", 
+      color: "bg-purple-500", 
+      icon: "✉️",
+      bgColor: "bg-purple-50"
+    }
+  };
 
-  const today = new Date();
-  const dueDate = new Date(date);
-  const diffTime = dueDate - today;
-  const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
-
-  let colorClass, icon;
-  if (diffDays < 0) {
-    colorClass = "from-red-500 to-red-600 text-white";
-    icon = <ExclamationCircleIcon className="w-3 h-3" />;
-  } else if (diffDays <= 3) {
-    colorClass = "from-yellow-500 to-orange-500 text-white";
-    icon = <ClockIcon className="w-3 h-3" />;
-  } else {
-    colorClass = "from-green-500 to-emerald-500 text-white";
-    icon = <CalendarIcon className="w-3 h-3" />;
-  }
+  const config = platformConfig[platform] || platformConfig.whatsapp;
+  const statusColor = status === 'connected' ? 'bg-green-500' : 
+                     status === 'configured' ? 'bg-yellow-500' : 'bg-gray-400';
 
   return (
-    <div className={`inline-flex items-center gap-1 px-2 py-1 rounded-full bg-gradient-to-r ${colorClass} text-xs font-medium shadow-sm`}>
-      {icon}
-      <span>{dueDate.toLocaleDateString()}</span>
+    <div className={`inline-flex items-center gap-2 px-3 py-2 rounded-lg ${config.bgColor} border`}>
+      <span className="text-lg">{config.icon}</span>
+      <div className="flex flex-col">
+        <span className="text-sm font-medium text-gray-800">{config.name}</span>
+        {lastActivity && (
+          <span className="text-xs text-gray-500">
+            {formatDistanceToNow(new Date(lastActivity), { addSuffix: true, locale: ptBR })}
+          </span>
+        )}
+      </div>
+      <div className={`w-3 h-3 rounded-full ${statusColor}`}></div>
     </div>
   );
 };
 
-// Progress Bar Component
-const ProgressBar = ({ value }) => {
-  const percentage = Math.min(Math.max(value || 0, 0), 100);
+// Communication Message Component
+const MessageItem = ({ message, isLast }) => {
+  const isIncoming = message.direction === 'incoming';
+  const platformIcons = {
+    whatsapp: "💬",
+    messenger: "📧", 
+    email: "✉️"
+  };
+
+  return (
+    <div className={`flex ${isIncoming ? 'justify-start' : 'justify-end'} mb-3`}>
+      <div className={`max-w-xs lg:max-w-md px-4 py-2 rounded-lg ${
+        isIncoming 
+          ? 'bg-gray-100 text-gray-800' 
+          : 'bg-blue-500 text-white'
+      } shadow-sm`}>
+        {isIncoming && (
+          <div className="flex items-center gap-1 mb-1">
+            <span className="text-sm">{platformIcons[message.channel]}</span>
+            <span className="text-xs text-gray-500">{message.channel}</span>
+            {message.automated_response && (
+              <span className="text-xs bg-green-100 text-green-800 px-1 rounded">Auto</span>
+            )}
+          </div>
+        )}
+        <p className="text-sm">{message.content}</p>
+        <div className={`flex items-center gap-2 mt-1 ${
+          isIncoming ? 'text-gray-500' : 'text-blue-100'
+        } text-xs`}>
+          <span>{formatDistanceToNow(new Date(message.timestamp), { addSuffix: true, locale: ptBR })}</span>
+          {message.intent && (
+            <span className="bg-purple-100 text-purple-800 px-1 rounded">
+              {message.intent}
+            </span>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+};
+
+// Enhanced Card Component with Communication History
+const Card = ({ card, onEdit, onDelete, communications = [] }) => {
+  const [showCommunications, setShowCommunications] = useState(false);
+  const [cardCommunications, setCardCommunications] = useState([]);
   
+  useEffect(() => {
+    // Filter communications for this card
+    const filtered = communications.filter(comm => comm.card_id === card.id);
+    setCardCommunications(filtered.slice(0, 5)); // Show last 5 messages
+  }, [communications, card.id]);
+
+  const lastCommunication = cardCommunications[0];
+  const hasRecentActivity = lastCommunication && 
+    new Date() - new Date(lastCommunication.timestamp) < 24 * 60 * 60 * 1000; // Last 24h
+
   return (
-    <div className="w-full bg-gray-200 dark:bg-gray-700 rounded-full h-2 shadow-inner">
-      <motion.div
-        initial={{ width: 0 }}
-        animate={{ width: `${percentage}%` }}
-        transition={{ duration: 0.8, ease: "easeOut" }}
-        className="bg-gradient-to-r from-blue-500 to-purple-500 h-2 rounded-full shadow-sm"
-      />
-    </div>
+    <motion.div
+      layout
+      initial={{ opacity: 0, y: 20 }}
+      animate={{ opacity: 1, y: 0 }}
+      exit={{ opacity: 0, y: -20 }}
+      className="bg-white rounded-xl shadow-sm border border-gray-100 p-4 hover:shadow-md transition-all duration-200 group"
+    >
+      <div className="flex items-start justify-between mb-3">
+        <div className="flex-1">
+          <h3 className="text-sm font-semibold text-gray-900 mb-1 leading-tight">
+            {card.title}
+          </h3>
+          {hasRecentActivity && (
+            <div className="flex items-center gap-1 mb-2">
+              <div className="w-2 h-2 bg-green-500 rounded-full animate-pulse"></div>
+              <span className="text-xs text-green-600 font-medium">Ativo agora</span>
+            </div>
+          )}
+        </div>
+        <div className="flex items-center gap-1">
+          {cardCommunications.length > 0 && (
+            <button
+              onClick={() => setShowCommunications(!showCommunications)}
+              className="p-1 hover:bg-gray-100 rounded-md transition-colors"
+              title={`${cardCommunications.length} mensagens`}
+            >
+              <ChatBubbleLeftIcon className="w-4 h-4 text-blue-500" />
+              <span className="text-xs text-blue-500 ml-1">{cardCommunications.length}</span>
+            </button>
+          )}
+          <button
+            onClick={() => onEdit(card)}
+            className="opacity-0 group-hover:opacity-100 p-1 hover:bg-gray-100 rounded-md transition-all"
+          >
+            <EllipsisHorizontalIcon className="w-4 h-4 text-gray-400" />
+          </button>
+        </div>
+      </div>
+
+      {card.description && (
+        <p className="text-xs text-gray-600 mb-3 line-clamp-2">
+          {card.description}
+        </p>
+      )}
+
+      {/* Contact Information */}
+      {(card.contact_name || card.contact_phone || card.contact_email) && (
+        <div className="space-y-1 mb-3">
+          {card.contact_name && (
+            <div className="flex items-center gap-2">
+              <UserIcon className="w-3 h-3 text-gray-400" />
+              <span className="text-xs text-gray-700">{card.contact_name}</span>
+            </div>
+          )}
+          {card.contact_phone && (
+            <div className="flex items-center gap-2">
+              <PhoneIcon className="w-3 h-3 text-gray-400" />
+              <span className="text-xs text-gray-700">{card.contact_phone}</span>
+            </div>
+          )}
+          {card.contact_email && (
+            <div className="flex items-center gap-2">
+              <EnvelopeIcon className="w-3 h-3 text-gray-400" />
+              <span className="text-xs text-gray-700 truncate">{card.contact_email}</span>
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* Communication History Preview */}
+      {showCommunications && cardCommunications.length > 0 && (
+        <div className="border-t pt-3 mb-3 max-h-40 overflow-y-auto">
+          <h4 className="text-xs font-medium text-gray-700 mb-2">Últimas Conversas</h4>
+          {cardCommunications.map((comm) => (
+            <div key={comm.id} className="mb-2 last:mb-0">
+              <div className={`text-xs p-2 rounded ${
+                comm.direction === 'incoming' 
+                  ? 'bg-gray-50 text-gray-700' 
+                  : 'bg-blue-50 text-blue-700'
+              }`}>
+                <div className="flex items-center gap-1 mb-1">
+                  <span>{comm.channel === 'whatsapp' ? '💬' : '📧'}</span>
+                  <span className="font-medium">{comm.direction === 'incoming' ? 'Cliente' : 'Você'}</span>
+                  {comm.automated_response && (
+                    <span className="bg-green-100 text-green-700 px-1 rounded text-xs">Auto</span>
+                  )}
+                </div>
+                <p className="line-clamp-2">{comm.content}</p>
+                <span className="text-gray-500 text-xs">
+                  {formatDistanceToNow(new Date(comm.timestamp), { addSuffix: true, locale: ptBR })}
+                </span>
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+
+      {/* Card Footer */}
+      <div className="flex items-center justify-between">
+        <div className="flex items-center gap-2">
+          <PriorityBadge priority={card.priority} />
+          {card.estimated_value > 0 && (
+            <div className="inline-flex items-center gap-1 px-2 py-1 rounded-full text-xs font-medium bg-green-100 text-green-800">
+              <CurrencyDollarIcon className="w-3 h-3" />
+              R$ {card.estimated_value.toLocaleString('pt-BR')}
+            </div>
+          )}
+        </div>
+        {lastCommunication && (
+          <div className="text-xs text-gray-500">
+            {lastCommunication.channel === 'whatsapp' ? '💬' : '📧'}
+            {formatDistanceToNow(new Date(lastCommunication.timestamp), { addSuffix: true, locale: ptBR })}
+          </div>
+        )}
+      </div>
+
+      {/* Tags */}
+      {card.tags && card.tags.length > 0 && (
+        <div className="flex flex-wrap gap-1 mt-2">
+          {card.tags.slice(0, 3).map(tag => (
+            <span key={tag} className="inline-flex items-center gap-1 px-2 py-1 rounded-full text-xs bg-gray-100 text-gray-700">
+              <TagIcon className="w-3 h-3" />
+              {tag}
+            </span>
+          ))}
+          {card.tags.length > 3 && (
+            <span className="text-xs text-gray-500">+{card.tags.length - 3}</span>
+          )}
+        </div>
+      )}
+    </motion.div>
   );
 };
 
-// Enhanced Sortable Card Component
-const SortableCard = ({ card, onEdit, onDelete, isDarkMode }) => {
+// Sortable Card Component
+const SortableCard = ({ card, communications, onEdit, onDelete }) => {
   const {
     attributes,
     listeners,
@@ -159,642 +359,380 @@ const SortableCard = ({ card, onEdit, onDelete, isDarkMode }) => {
     transform,
     transition,
     isDragging,
-  } = useSortable({ id: card.id });
+  } = useSortable({
+    id: card.id,
+  });
 
   const style = {
     transform: CSS.Transform.toString(transform),
     transition,
-  };
-
-  const formatCurrency = (value) => {
-    return new Intl.NumberFormat('pt-BR', {
-      style: 'currency',
-      currency: 'BRL',
-      minimumFractionDigits: 0,
-    }).format(value || 0);
-  };
-
-  const getRandomProgress = () => {
-    return Math.floor(Math.random() * 100) + 1;
+    opacity: isDragging ? 0.5 : 1,
   };
 
   return (
-    <motion.div
-      ref={setNodeRef}
-      style={style}
-      {...attributes}
-      {...listeners}
-      layout
-      initial={{ opacity: 0, y: 20 }}
-      animate={{ opacity: isDragging ? 0.7 : 1, y: 0 }}
-      exit={{ opacity: 0, y: -20 }}
-      whileHover={{ 
-        scale: 1.02, 
-        y: -4,
-        boxShadow: "0 20px 25px -5px rgba(0, 0, 0, 0.1), 0 10px 10px -5px rgba(0, 0, 0, 0.04)"
-      }}
-      whileTap={{ scale: 0.98 }}
-      className={`
-        ${isDarkMode ? 'bg-gray-800 border-gray-700' : 'bg-white border-gray-200'}
-        rounded-2xl p-5 border shadow-lg hover:shadow-xl transition-all duration-300 cursor-grab active:cursor-grabbing mb-4
-        backdrop-blur-sm
-      `}
-    >
-      <div className="flex justify-between items-start mb-3">
-        <h3 className={`font-bold ${isDarkMode ? 'text-white' : 'text-gray-900'} text-sm leading-tight line-clamp-2`}>
-          {card.title}
-        </h3>
-        <div className="flex items-center gap-2">
-          <PriorityBadge priority={card.priority} />
-          <motion.button
-            whileHover={{ scale: 1.1 }}
-            whileTap={{ scale: 0.9 }}
-            onClick={(e) => {
-              e.stopPropagation();
-              onEdit(card);
-            }}
-            className={`p-1.5 hover:bg-gray-100 dark:hover:bg-gray-700 rounded-full transition-colors ${isDarkMode ? 'text-gray-400 hover:text-gray-300' : 'text-gray-400 hover:text-gray-600'}`}
-          >
-            <EllipsisHorizontalIcon className="w-4 h-4" />
-          </motion.button>
-        </div>
-      </div>
-      
-      {card.description && (
-        <p className={`${isDarkMode ? 'text-gray-300' : 'text-gray-600'} text-sm mb-4 line-clamp-2`}>
-          {card.description}
-        </p>
-      )}
-
-      {/* Progress Bar */}
-      <div className="mb-4">
-        <div className="flex justify-between items-center mb-2">
-          <span className={`text-xs font-medium ${isDarkMode ? 'text-gray-400' : 'text-gray-500'}`}>
-            Progresso
-          </span>
-          <span className={`text-xs font-bold ${isDarkMode ? 'text-gray-300' : 'text-gray-700'}`}>
-            {getRandomProgress()}%
-          </span>
-        </div>
-        <ProgressBar value={getRandomProgress()} />
-      </div>
-
-      <div className="space-y-3 text-xs">
-        {card.contact_name && (
-          <div className="flex items-center gap-2">
-            <UserIcon className={`w-4 h-4 ${isDarkMode ? 'text-gray-400' : 'text-gray-500'}`} />
-            <span className={isDarkMode ? 'text-gray-300' : 'text-gray-600'}>{card.contact_name}</span>
-          </div>
-        )}
-        
-        {card.contact_email && (
-          <div className="flex items-center gap-2">
-            <EnvelopeIcon className={`w-4 h-4 ${isDarkMode ? 'text-gray-400' : 'text-gray-500'}`} />
-            <span className={isDarkMode ? 'text-gray-300' : 'text-gray-600'}>{card.contact_email}</span>
-          </div>
-        )}
-        
-        {card.estimated_value > 0 && (
-          <div className="flex items-center gap-2">
-            <CurrencyDollarIcon className="w-4 h-4 text-green-500" />
-            <span className="font-bold text-green-600 dark:text-green-400">
-              {formatCurrency(card.estimated_value)}
-            </span>
-          </div>
-        )}
-      </div>
-
-      {/* Bottom Section */}
-      <div className="flex justify-between items-center mt-4 pt-3 border-t border-gray-100 dark:border-gray-700">
-        <div className="flex items-center gap-2">
-          {card.assigned_to && <Avatar name={card.assigned_to} size="xs" />}
-          {card.due_date && <DateChip date={card.due_date} />}
-        </div>
-        
-        {card.tags && card.tags.length > 0 && (
-          <div className="flex gap-1">
-            {card.tags.slice(0, 2).map((tag, index) => (
-              <motion.span
-                key={index}
-                initial={{ scale: 0 }}
-                animate={{ scale: 1 }}
-                className="px-2 py-1 bg-gradient-to-r from-blue-100 to-purple-100 dark:from-blue-900 dark:to-purple-900 text-blue-800 dark:text-blue-200 text-xs rounded-full font-medium"
-              >
-                {tag}
-              </motion.span>
-            ))}
-            {card.tags.length > 2 && (
-              <span className={`px-2 py-1 ${isDarkMode ? 'bg-gray-700 text-gray-300' : 'bg-gray-100 text-gray-600'} text-xs rounded-full font-medium`}>
-                +{card.tags.length - 2}
-              </span>
-            )}
-          </div>
-        )}
-      </div>
-    </motion.div>
+    <div ref={setNodeRef} style={style} {...attributes} {...listeners}>
+      <Card card={card} communications={communications} onEdit={onEdit} onDelete={onDelete} />
+    </div>
   );
 };
 
-// Enhanced Kanban Column Component
-const KanbanColumn = ({ column, cards, onAddCard, onEditCard, onDeleteCard, isDarkMode, isDragOver }) => {
-  const {
-    setNodeRef,
-  } = useSortable({ id: column.id });
+// Column Component with Communication Stats
+const Column = ({ column, cards, communications, onAddCard, onEditCard, onDeleteCard }) => {
+  const columnCommunications = communications.filter(comm => 
+    cards.find(card => card.id === comm.card_id)
+  );
 
-  const columnCards = cards.filter(card => card.column_id === column.id)
-    .sort((a, b) => a.position - b.position);
-
-  const getTotalValue = () => {
-    return columnCards.reduce((sum, card) => sum + (card.estimated_value || 0), 0);
-  };
-
-  const formatCurrency = (value) => {
-    return new Intl.NumberFormat('pt-BR', {
-      style: 'currency',
-      currency: 'BRL',
-      minimumFractionDigits: 0,
-    }).format(value);
-  };
-
-  const columnConfig = {
-    "Prospects 🎯": "from-red-100 to-pink-100 dark:from-red-900/30 dark:to-pink-900/30",
-    "Contact Made 📞": "from-yellow-100 to-orange-100 dark:from-yellow-900/30 dark:to-orange-900/30",
-    "Proposal Sent 📄": "from-blue-100 to-indigo-100 dark:from-blue-900/30 dark:to-indigo-900/30",
-    "Closed Won 🎉": "from-green-100 to-emerald-100 dark:from-green-900/30 dark:to-emerald-900/30"
-  };
-
-  const bgGradient = columnConfig[column.title] || "from-gray-100 to-gray-200 dark:from-gray-800 dark:to-gray-900";
+  const recentActivity = columnCommunications.filter(comm => 
+    new Date() - new Date(comm.timestamp) < 24 * 60 * 60 * 1000 // Last 24h
+  ).length;
 
   return (
-    <motion.div
-      layout
-      initial={{ opacity: 0, x: -20 }}
-      animate={{ opacity: 1, x: 0 }}
-      className={`
-        bg-gradient-to-br ${bgGradient} rounded-2xl p-6 min-h-96 w-80 flex-shrink-0 shadow-lg
-        ${isDragOver ? 'ring-4 ring-blue-500 ring-opacity-50 scale-105' : ''}
-        transition-all duration-300 backdrop-blur-sm border border-white/20
-      `}
-    >
-      <div className="flex items-center justify-between mb-6">
-        <div>
-          <h2 className={`font-bold text-lg ${isDarkMode ? 'text-white' : 'text-gray-900'} flex items-center gap-3`}>
-            <motion.div 
-              className="w-4 h-4 rounded-full shadow-lg" 
-              style={{ backgroundColor: column.color }}
-              whileHover={{ scale: 1.2 }}
-            />
+    <div className="flex-shrink-0 w-80 bg-gray-50 rounded-xl p-4">
+      <div className="flex items-center justify-between mb-4">
+        <div className="flex items-center gap-3">
+          <div 
+            className="w-3 h-3 rounded-full"
+            style={{ backgroundColor: column.color }}
+          ></div>
+          <h2 className="text-sm font-semibold text-gray-800">
             {column.title}
           </h2>
-          <div className={`text-sm ${isDarkMode ? 'text-gray-300' : 'text-gray-600'} mt-1 font-medium`}>
-            {columnCards.length} cards • {formatCurrency(getTotalValue())}
-          </div>
+          <span className="bg-gray-200 text-gray-600 px-2 py-1 rounded-full text-xs font-medium">
+            {cards.length}
+          </span>
         </div>
-        <motion.button
-          whileHover={{ scale: 1.1, rotate: 90 }}
-          whileTap={{ scale: 0.9 }}
-          onClick={() => onAddCard(column.id)}
-          className={`p-3 hover:bg-white/20 dark:hover:bg-gray-700/50 rounded-xl transition-all duration-200 ${isDarkMode ? 'text-gray-300 hover:text-white' : 'text-gray-600 hover:text-gray-800'} shadow-lg backdrop-blur-sm`}
-        >
-          <PlusIcon className="w-5 h-5" />
-        </motion.button>
+        <div className="flex items-center gap-2">
+          {recentActivity > 0 && (
+            <span className="flex items-center gap-1 text-xs text-green-600 bg-green-100 px-2 py-1 rounded-full">
+              <ChatBubbleLeftIcon className="w-3 h-3" />
+              {recentActivity}
+            </span>
+          )}
+          <button
+            onClick={() => onAddCard(column.id)}
+            className="p-1 hover:bg-white hover:shadow-sm rounded-md transition-all"
+          >
+            <PlusIcon className="w-4 h-4 text-gray-600" />
+          </button>
+        </div>
       </div>
 
-      <div ref={setNodeRef} className="space-y-4">
-        <SortableContext items={columnCards.map(card => card.id)} strategy={verticalListSortingStrategy}>
-          <AnimatePresence>
-            {columnCards.map((card) => (
-              <SortableCard
-                key={card.id}
-                card={card}
-                onEdit={onEditCard}
-                onDelete={onDeleteCard}
-                isDarkMode={isDarkMode}
-              />
-            ))}
-          </AnimatePresence>
-        </SortableContext>
-        
-        {columnCards.length === 0 && (
-          <motion.div
-            initial={{ opacity: 0 }}
-            animate={{ opacity: 1 }}
-            className="text-center py-12"
-          >
-            <div className={`text-6xl mb-4 ${isDarkMode ? 'text-gray-600' : 'text-gray-300'}`}>📭</div>
-            <div className={`text-sm ${isDarkMode ? 'text-gray-400' : 'text-gray-500'} mb-2`}>
-              Arraste cards aqui ou
-            </div>
-            <motion.button
-              whileHover={{ scale: 1.05 }}
-              whileTap={{ scale: 0.95 }}
-              onClick={() => onAddCard(column.id)}
-              className="text-blue-600 dark:text-blue-400 hover:text-blue-700 dark:hover:text-blue-300 text-sm font-semibold"
-            >
-              Adicione um card
-            </motion.button>
-          </motion.div>
-        )}
-      </div>
-    </motion.div>
+      <SortableContext items={cards.map(card => card.id)} strategy={verticalListSortingStrategy}>
+        <div className="space-y-3 min-h-[200px]">
+          {cards.map(card => (
+            <SortableCard
+              key={card.id}
+              card={card}
+              communications={communications}
+              onEdit={onEditCard}
+              onDelete={onDeleteCard}
+            />
+          ))}
+        </div>
+      </SortableContext>
+    </div>
   );
 };
 
-// Enhanced Card Modal Component
-const CardModal = ({ card, isOpen, onClose, onSave, columnId, isDarkMode }) => {
-  const [formData, setFormData] = useState({
-    title: "",
-    description: "",
-    contact_name: "",
-    contact_email: "",
-    contact_phone: "",
-    estimated_value: 0,
-    priority: "medium",
-    assigned_to: "",
-    tags: [],
-    due_date: "",
-  });
+// Communications Tab Component
+const CommunicationsTab = () => {
+  const [communications, setCommunications] = useState([]);
+  const [contacts, setContacts] = useState([]);
+  const [platformsStatus, setPlatformsStatus] = useState({});
+  const [whatsappQR, setWhatsappQR] = useState(null);
+  const [loading, setLoading] = useState(false);
+  const [activeTab, setActiveTab] = useState('overview');
 
   useEffect(() => {
-    if (card) {
-      setFormData({
-        title: card.title || "",
-        description: card.description || "",
-        contact_name: card.contact_name || "",
-        contact_email: card.contact_email || "",
-        contact_phone: card.contact_phone || "",
-        estimated_value: card.estimated_value || 0,
-        priority: card.priority || "medium",
-        assigned_to: card.assigned_to || "",
-        tags: card.tags || [],
-        due_date: card.due_date ? card.due_date.split('T')[0] : "",
-      });
-    } else {
-      setFormData({
-        title: "",
-        description: "",
-        contact_name: "",
-        contact_email: "",
-        contact_phone: "",
-        estimated_value: 0,
-        priority: "medium",
-        assigned_to: "",
-        tags: [],
-        due_date: "",
-      });
-    }
-  }, [card]);
+    loadCommunicationsData();
+    loadPlatformsStatus();
+    
+    // Poll for updates every 10 seconds
+    const interval = setInterval(() => {
+      loadCommunicationsData();
+      loadPlatformsStatus();
+    }, 10000);
+    
+    return () => clearInterval(interval);
+  }, []);
 
-  const handleSubmit = (e) => {
-    e.preventDefault();
-    const submitData = { ...formData };
-    if (submitData.due_date) {
-      submitData.due_date = new Date(submitData.due_date).toISOString();
+  const loadCommunicationsData = async () => {
+    try {
+      const [communicationsRes, contactsRes] = await Promise.all([
+        axios.get(`${API}/communications`),
+        axios.get(`${API}/contacts`)
+      ]);
+      
+      setCommunications(communicationsRes.data || []);
+      setContacts(contactsRes.data || []);
+    } catch (error) {
+      console.error('Error loading communications data:', error);
     }
-    if (!card) {
-      submitData.column_id = columnId;
-    }
-    onSave(submitData);
   };
 
-  if (!isOpen) return null;
-
-  return (
-    <motion.div
-      initial={{ opacity: 0 }}
-      animate={{ opacity: 1 }}
-      exit={{ opacity: 0 }}
-      className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-50 p-4"
-      onClick={onClose}
-    >
-      <motion.div
-        initial={{ scale: 0.9, opacity: 0 }}
-        animate={{ scale: 1, opacity: 1 }}
-        exit={{ scale: 0.9, opacity: 0 }}
-        onClick={(e) => e.stopPropagation()}
-        className={`
-          ${isDarkMode ? 'bg-gray-800 border-gray-700' : 'bg-white border-gray-200'}
-          rounded-2xl p-8 w-full max-w-2xl max-h-90vh overflow-y-auto shadow-2xl border
-        `}
-      >
-        <div className="flex justify-between items-center mb-6">
-          <h2 className={`text-2xl font-bold ${isDarkMode ? 'text-white' : 'text-gray-900'}`}>
-            {card ? "✏️ Editar Card" : "➕ Novo Card"}
-          </h2>
-          <motion.button
-            whileHover={{ scale: 1.1 }}
-            whileTap={{ scale: 0.9 }}
-            onClick={onClose}
-            className={`p-2 hover:bg-gray-100 dark:hover:bg-gray-700 rounded-full ${isDarkMode ? 'text-gray-400' : 'text-gray-500'}`}
-          >
-            <XMarkIcon className="w-6 h-6" />
-          </motion.button>
-        </div>
-        
-        <form onSubmit={handleSubmit} className="space-y-6">
-          <div>
-            <label className={`block text-sm font-semibold ${isDarkMode ? 'text-gray-200' : 'text-gray-700'} mb-2`}>
-              Título *
-            </label>
-            <input
-              type="text"
-              required
-              value={formData.title}
-              onChange={(e) => setFormData({...formData, title: e.target.value})}
-              className={`
-                w-full p-4 border rounded-xl focus:ring-4 focus:ring-blue-500/20 focus:border-blue-500 transition-all
-                ${isDarkMode ? 'bg-gray-700 border-gray-600 text-white' : 'bg-white border-gray-300 text-gray-900'}
-                text-lg font-medium
-              `}
-              placeholder="Ex: Acme Corp - Proposta Enterprise"
-            />
-          </div>
-
-          <div>
-            <label className={`block text-sm font-semibold ${isDarkMode ? 'text-gray-200' : 'text-gray-700'} mb-2`}>
-              Descrição
-            </label>
-            <textarea
-              value={formData.description}
-              onChange={(e) => setFormData({...formData, description: e.target.value})}
-              className={`
-                w-full p-4 border rounded-xl focus:ring-4 focus:ring-blue-500/20 focus:border-blue-500 transition-all
-                ${isDarkMode ? 'bg-gray-700 border-gray-600 text-white' : 'bg-white border-gray-300 text-gray-900'}
-              `}
-              rows="3"
-              placeholder="Descreva os detalhes do negócio..."
-            />
-          </div>
-
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-            <div>
-              <label className={`block text-sm font-semibold ${isDarkMode ? 'text-gray-200' : 'text-gray-700'} mb-2`}>
-                Nome do Contato
-              </label>
-              <input
-                type="text"
-                value={formData.contact_name}
-                onChange={(e) => setFormData({...formData, contact_name: e.target.value})}
-                className={`
-                  w-full p-4 border rounded-xl focus:ring-4 focus:ring-blue-500/20 focus:border-blue-500 transition-all
-                  ${isDarkMode ? 'bg-gray-700 border-gray-600 text-white' : 'bg-white border-gray-300 text-gray-900'}
-                `}
-                placeholder="João Silva"
-              />
-            </div>
-
-            <div>
-              <label className={`block text-sm font-semibold ${isDarkMode ? 'text-gray-200' : 'text-gray-700'} mb-2`}>
-                Email
-              </label>
-              <input
-                type="email"
-                value={formData.contact_email}
-                onChange={(e) => setFormData({...formData, contact_email: e.target.value})}
-                className={`
-                  w-full p-4 border rounded-xl focus:ring-4 focus:ring-blue-500/20 focus:border-blue-500 transition-all
-                  ${isDarkMode ? 'bg-gray-700 border-gray-600 text-white' : 'bg-white border-gray-300 text-gray-900'}
-                `}
-                placeholder="joao@empresa.com"
-              />
-            </div>
-          </div>
-
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-            <div>
-              <label className={`block text-sm font-semibold ${isDarkMode ? 'text-gray-200' : 'text-gray-700'} mb-2`}>
-                Telefone
-              </label>
-              <input
-                type="tel"
-                value={formData.contact_phone}
-                onChange={(e) => setFormData({...formData, contact_phone: e.target.value})}
-                className={`
-                  w-full p-4 border rounded-xl focus:ring-4 focus:ring-blue-500/20 focus:border-blue-500 transition-all
-                  ${isDarkMode ? 'bg-gray-700 border-gray-600 text-white' : 'bg-white border-gray-300 text-gray-900'}
-                `}
-                placeholder="(11) 99999-9999"
-              />
-            </div>
-
-            <div>
-              <label className={`block text-sm font-semibold ${isDarkMode ? 'text-gray-200' : 'text-gray-700'} mb-2`}>
-                Valor Estimado (R$)
-              </label>
-              <input
-                type="number"
-                value={formData.estimated_value}
-                onChange={(e) => setFormData({...formData, estimated_value: parseFloat(e.target.value) || 0})}
-                className={`
-                  w-full p-4 border rounded-xl focus:ring-4 focus:ring-blue-500/20 focus:border-blue-500 transition-all
-                  ${isDarkMode ? 'bg-gray-700 border-gray-600 text-white' : 'bg-white border-gray-300 text-gray-900'}
-                `}
-                placeholder="25000"
-              />
-            </div>
-          </div>
-
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-            <div>
-              <label className={`block text-sm font-semibold ${isDarkMode ? 'text-gray-200' : 'text-gray-700'} mb-2`}>
-                Prioridade
-              </label>
-              <select
-                value={formData.priority}
-                onChange={(e) => setFormData({...formData, priority: e.target.value})}
-                className={`
-                  w-full p-4 border rounded-xl focus:ring-4 focus:ring-blue-500/20 focus:border-blue-500 transition-all
-                  ${isDarkMode ? 'bg-gray-700 border-gray-600 text-white' : 'bg-white border-gray-300 text-gray-900'}
-                `}
-              >
-                <option value="low">Baixa</option>
-                <option value="medium">Média</option>
-                <option value="high">Alta</option>
-              </select>
-            </div>
-
-            <div>
-              <label className={`block text-sm font-semibold ${isDarkMode ? 'text-gray-200' : 'text-gray-700'} mb-2`}>
-                Responsável
-              </label>
-              <input
-                type="text"
-                value={formData.assigned_to}
-                onChange={(e) => setFormData({...formData, assigned_to: e.target.value})}
-                className={`
-                  w-full p-4 border rounded-xl focus:ring-4 focus:ring-blue-500/20 focus:border-blue-500 transition-all
-                  ${isDarkMode ? 'bg-gray-700 border-gray-600 text-white' : 'bg-white border-gray-300 text-gray-900'}
-                `}
-                placeholder="Maria Silva"
-              />
-            </div>
-
-            <div>
-              <label className={`block text-sm font-semibold ${isDarkMode ? 'text-gray-200' : 'text-gray-700'} mb-2`}>
-                Data Limite
-              </label>
-              <input
-                type="date"
-                value={formData.due_date}
-                onChange={(e) => setFormData({...formData, due_date: e.target.value})}
-                className={`
-                  w-full p-4 border rounded-xl focus:ring-4 focus:ring-blue-500/20 focus:border-blue-500 transition-all
-                  ${isDarkMode ? 'bg-gray-700 border-gray-600 text-white' : 'bg-white border-gray-300 text-gray-900'}
-                `}
-              />
-            </div>
-          </div>
-
-          <div className="flex justify-end gap-4 pt-6 border-t border-gray-200 dark:border-gray-700">
-            <motion.button
-              whileHover={{ scale: 1.02 }}
-              whileTap={{ scale: 0.98 }}
-              type="button"
-              onClick={onClose}
-              className={`px-6 py-3 rounded-xl font-semibold transition-all ${isDarkMode ? 'text-gray-300 hover:text-white hover:bg-gray-700' : 'text-gray-600 hover:text-gray-800 hover:bg-gray-100'}`}
-            >
-              Cancelar
-            </motion.button>
-            <motion.button
-              whileHover={{ scale: 1.02 }}
-              whileTap={{ scale: 0.98 }}
-              type="submit"
-              className="px-8 py-3 bg-gradient-to-r from-blue-600 to-purple-600 text-white rounded-xl font-semibold shadow-lg hover:shadow-xl transition-all"
-            >
-              {card ? "Atualizar Card" : "Criar Card"}
-            </motion.button>
-          </div>
-        </form>
-      </motion.div>
-    </motion.div>
-  );
-};
-
-// Enhanced Analytics Dashboard Component
-const AnalyticsDashboard = ({ analytics, isDarkMode }) => {
-  if (!analytics) return null;
-
-  const formatCurrency = (value) => {
-    return new Intl.NumberFormat('pt-BR', {
-      style: 'currency',
-      currency: 'BRL',
-      minimumFractionDigits: 0,
-    }).format(value);
+  const loadPlatformsStatus = async () => {
+    try {
+      const response = await axios.get(`${API}/platforms/status`);
+      setPlatformsStatus(response.data || {});
+    } catch (error) {
+      console.error('Error loading platforms status:', error);
+    }
   };
 
-  const statsCards = [
-    {
-      title: "Total de Cards",
-      value: analytics.total_cards,
-      icon: ArrowTrendingUpIcon,
-      color: "from-blue-500 to-blue-600",
-      bgColor: "from-blue-50 to-blue-100 dark:from-blue-900/20 dark:to-blue-800/20"
-    },
-    {
-      title: "Valor do Pipeline",
-      value: formatCurrency(analytics.total_pipeline_value),
-      icon: CurrencyDollarIcon,
-      color: "from-green-500 to-green-600",
-      bgColor: "from-green-50 to-green-100 dark:from-green-900/20 dark:to-green-800/20"
-    },
-    {
-      title: "Ticket Médio",
-      value: formatCurrency(analytics.total_pipeline_value / Math.max(analytics.total_cards, 1)),
-      icon: ArrowTrendingUpIcon,
-      color: "from-orange-500 to-orange-600",
-      bgColor: "from-orange-50 to-orange-100 dark:from-orange-900/20 dark:to-orange-800/20"
-    },
-    {
-      title: "Etapas Ativas",
-      value: Object.keys(analytics.column_stats).length,
-      icon: ChartBarIcon,
-      color: "from-purple-500 to-purple-600",
-      bgColor: "from-purple-50 to-purple-100 dark:from-purple-900/20 dark:to-purple-800/20"
+  const connectWhatsApp = async () => {
+    setLoading(true);
+    try {
+      const response = await axios.get(`${API}/whatsapp/qr`);
+      setWhatsappQR(response.data.qr);
+      
+      if (!response.data.qr && response.data.connected) {
+        toast.success('WhatsApp já está conectado!');
+      }
+    } catch (error) {
+      toast.error('Erro ao conectar WhatsApp');
+      console.error('Error connecting WhatsApp:', error);
+    } finally {
+      setLoading(false);
     }
+  };
+
+  const tabs = [
+    { id: 'overview', name: 'Visão Geral', icon: ChartBarIcon },
+    { id: 'messages', name: 'Mensagens', icon: ChatBubbleLeftRightIcon },
+    { id: 'config', name: 'Configurações', icon: CogIcon },
   ];
 
   return (
-    <motion.div
-      initial={{ opacity: 0, y: 20 }}
-      animate={{ opacity: 1, y: 0 }}
-      className={`${isDarkMode ? 'bg-gray-800 border-gray-700' : 'bg-white border-gray-200'} rounded-2xl p-8 mb-8 shadow-xl border backdrop-blur-sm`}
-    >
-      <div className="flex items-center gap-3 mb-8">
-        <div className="p-3 bg-gradient-to-r from-blue-500 to-purple-500 rounded-xl shadow-lg">
-          <ChartBarIcon className="text-white w-6 h-6" />
+    <div className="p-6">
+      {/* Header */}
+      <div className="mb-6">
+        <h1 className="text-2xl font-bold text-gray-900 mb-2">Central de Comunicação</h1>
+        <p className="text-gray-600">Gerencie todas as conversas com leads em um só lugar</p>
+      </div>
+
+      {/* Navigation Tabs */}
+      <div className="border-b border-gray-200 mb-6">
+        <nav className="flex space-x-8">
+          {tabs.map(tab => (
+            <button
+              key={tab.id}
+              onClick={() => setActiveTab(tab.id)}
+              className={`flex items-center gap-2 py-2 px-1 border-b-2 font-medium text-sm transition-colors ${
+                activeTab === tab.id
+                  ? 'border-blue-500 text-blue-600'
+                  : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'
+              }`}
+            >
+              <tab.icon className="w-5 h-5" />
+              {tab.name}
+            </button>
+          ))}
+        </nav>
+      </div>
+
+      {/* Tab Content */}
+      {activeTab === 'overview' && (
+        <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+          {/* Platform Status Cards */}
+          <div className="lg:col-span-2">
+            <h2 className="text-lg font-semibold text-gray-900 mb-4">Status das Plataformas</h2>
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 mb-6">
+              {['whatsapp', 'messenger'].map(platform => (
+                <div key={platform} className="bg-white rounded-lg border p-4">
+                  <div className="flex items-center justify-between mb-3">
+                    <PlatformStatus 
+                      platform={platform}
+                      status={platformsStatus[platform]?.active ? 'connected' : 'disconnected'}
+                      lastActivity={platformsStatus[platform]?.last_updated}
+                    />
+                  </div>
+                  <div className="text-sm text-gray-600">
+                    {platformsStatus[platform]?.configured 
+                      ? 'Plataforma configurada' 
+                      : 'Necessário configurar'
+                    }
+                  </div>
+                </div>
+              ))}
+            </div>
+
+            {/* Recent Communications */}
+            <h3 className="text-lg font-semibold text-gray-900 mb-4">Mensagens Recentes</h3>
+            <div className="bg-white rounded-lg border p-4 max-h-96 overflow-y-auto">
+              {communications.slice(0, 10).map((message, index) => (
+                <MessageItem 
+                  key={message.id} 
+                  message={message} 
+                  isLast={index === communications.length - 1} 
+                />
+              ))}
+              {communications.length === 0 && (
+                <div className="text-center py-8 text-gray-500">
+                  <ChatBubbleLeftRightIcon className="w-12 h-12 mx-auto mb-3 text-gray-300" />
+                  <p>Nenhuma conversa ainda</p>
+                  <p className="text-sm">As mensagens aparecerão aqui quando chegarem</p>
+                </div>
+              )}
+            </div>
+          </div>
+
+          {/* Statistics */}
+          <div>
+            <h3 className="text-lg font-semibold text-gray-900 mb-4">Estatísticas</h3>
+            <div className="space-y-4">
+              <div className="bg-white rounded-lg border p-4">
+                <div className="flex items-center justify-between">
+                  <span className="text-sm text-gray-600">Mensagens Hoje</span>
+                  <span className="text-2xl font-bold text-blue-600">
+                    {communications.filter(c => 
+                      new Date(c.timestamp).toDateString() === new Date().toDateString()
+                    ).length}
+                  </span>
+                </div>
+              </div>
+              
+              <div className="bg-white rounded-lg border p-4">
+                <div className="flex items-center justify-between">
+                  <span className="text-sm text-gray-600">Contatos Ativos</span>
+                  <span className="text-2xl font-bold text-green-600">
+                    {contacts.filter(c => 
+                      new Date() - new Date(c.last_seen) < 24 * 60 * 60 * 1000
+                    ).length}
+                  </span>
+                </div>
+              </div>
+              
+              <div className="bg-white rounded-lg border p-4">
+                <div className="flex items-center justify-between">
+                  <span className="text-sm text-gray-600">Respostas Automáticas</span>
+                  <span className="text-2xl font-bold text-purple-600">
+                    {communications.filter(c => c.automated_response).length}
+                  </span>
+                </div>
+              </div>
+            </div>
+          </div>
         </div>
-        <h2 className={`text-2xl font-bold ${isDarkMode ? 'text-white' : 'text-gray-900'}`}>
-          📊 Analytics do Pipeline
-        </h2>
-      </div>
+      )}
 
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6 mb-8">
-        {statsCards.map((stat, index) => (
-          <motion.div
-            key={stat.title}
-            initial={{ opacity: 0, y: 20 }}
-            animate={{ opacity: 1, y: 0 }}
-            transition={{ delay: index * 0.1 }}
-            className={`bg-gradient-to-br ${stat.bgColor} p-6 rounded-2xl shadow-lg border border-white/20`}
-          >
-            <div className="flex items-center gap-4 mb-4">
-              <div className={`p-3 bg-gradient-to-r ${stat.color} rounded-xl shadow-lg`}>
-                <stat.icon className="text-white w-5 h-5" />
-              </div>
-              <span className={`text-sm font-semibold ${isDarkMode ? 'text-gray-300' : 'text-gray-600'}`}>
-                {stat.title}
-              </span>
-            </div>
-            <div className={`text-2xl font-bold ${isDarkMode ? 'text-white' : 'text-gray-900'}`}>
-              {stat.value}
-            </div>
-          </motion.div>
-        ))}
-      </div>
+      {activeTab === 'messages' && (
+        <div className="bg-white rounded-lg border">
+          <div className="p-4 border-b">
+            <h2 className="text-lg font-semibold text-gray-900">Todas as Mensagens</h2>
+          </div>
+          <div className="p-4 max-h-96 overflow-y-auto">
+            {communications.map((message, index) => (
+              <MessageItem 
+                key={message.id} 
+                message={message} 
+                isLast={index === communications.length - 1} 
+              />
+            ))}
+          </div>
+        </div>
+      )}
 
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
-        {Object.entries(analytics.column_stats).map(([columnId, stats], index) => (
-          <motion.div
-            key={columnId}
-            initial={{ opacity: 0, x: -20 }}
-            animate={{ opacity: 1, x: 0 }}
-            transition={{ delay: index * 0.15 }}
-            className={`${isDarkMode ? 'bg-gray-700 border-gray-600' : 'bg-gray-50 border-gray-200'} border rounded-2xl p-6 shadow-lg`}
-          >
-            <h3 className={`font-bold text-lg ${isDarkMode ? 'text-white' : 'text-gray-900'} mb-4`}>
-              {stats.title}
-            </h3>
-            <div className="space-y-3">
-              <div className={`text-sm ${isDarkMode ? 'text-gray-300' : 'text-gray-600'}`}>
-                Cards: <span className={`font-bold ${isDarkMode ? 'text-white' : 'text-gray-900'}`}>{stats.count}</span>
+      {activeTab === 'config' && (
+        <div className="max-w-2xl">
+          <h2 className="text-lg font-semibold text-gray-900 mb-6">Configurações das Plataformas</h2>
+          
+          {/* WhatsApp Configuration */}
+          <div className="bg-white rounded-lg border p-6 mb-6">
+            <div className="flex items-center justify-between mb-4">
+              <div>
+                <h3 className="text-lg font-medium text-gray-900">WhatsApp</h3>
+                <p className="text-sm text-gray-600">Conecte sua conta do WhatsApp para receber mensagens</p>
               </div>
-              <div className={`text-sm ${isDarkMode ? 'text-gray-300' : 'text-gray-600'}`}>
-                Valor: <span className="font-bold text-green-600 dark:text-green-400">
-                  {formatCurrency(stats.total_value)}
-                </span>
+              <div className={`px-3 py-1 rounded-full text-sm ${
+                platformsStatus.whatsapp?.active
+                  ? 'bg-green-100 text-green-800'
+                  : 'bg-gray-100 text-gray-800'
+              }`}>
+                {platformsStatus.whatsapp?.active ? 'Conectado' : 'Desconectado'}
               </div>
             </div>
-          </motion.div>
-        ))}
-      </div>
-    </motion.div>
+            
+            {!platformsStatus.whatsapp?.active && (
+              <div className="text-center">
+                <button
+                  onClick={connectWhatsApp}
+                  disabled={loading}
+                  className="bg-green-600 text-white px-4 py-2 rounded-lg hover:bg-green-700 disabled:opacity-50 transition-colors"
+                >
+                  {loading ? 'Conectando...' : 'Conectar WhatsApp'}
+                </button>
+                
+                {whatsappQR && (
+                  <div className="mt-4">
+                    <p className="text-sm text-gray-600 mb-3">
+                      Escaneie o QR Code com seu WhatsApp:
+                    </p>
+                    <div className="flex justify-center">
+                      <QRCode value={whatsappQR} size={200} />
+                    </div>
+                    <p className="text-xs text-gray-500 mt-3">
+                      WhatsApp → Configurações → Aparelhos Conectados → Conectar Aparelho
+                    </p>
+                  </div>
+                )}
+              </div>
+            )}
+          </div>
+
+          {/* Messenger Configuration */}
+          <div className="bg-white rounded-lg border p-6">
+            <div className="flex items-center justify-between mb-4">
+              <div>
+                <h3 className="text-lg font-medium text-gray-900">Facebook Messenger</h3>
+                <p className="text-sm text-gray-600">Configure sua página do Facebook para receber mensagens</p>
+              </div>
+              <div className={`px-3 py-1 rounded-full text-sm ${
+                platformsStatus.messenger?.active
+                  ? 'bg-blue-100 text-blue-800'
+                  : 'bg-gray-100 text-gray-800'
+              }`}>
+                {platformsStatus.messenger?.active ? 'Conectado' : 'Desconectado'}
+              </div>
+            </div>
+            
+            {!platformsStatus.messenger?.active && (
+              <div className="text-center py-4">
+                <div className="text-sm text-gray-600 mb-4">
+                  <p>Para configurar o Messenger:</p>
+                  <ol className="list-decimal list-inside text-left max-w-md mx-auto space-y-1">
+                    <li>Crie uma página no Facebook</li>
+                    <li>Configure um App no Facebook Developers</li>
+                    <li>Adicione as credenciais nas variáveis de ambiente</li>
+                  </ol>
+                </div>
+                <button className="bg-blue-600 text-white px-4 py-2 rounded-lg hover:bg-blue-700 transition-colors">
+                  Ver Documentação
+                </button>
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+    </div>
   );
 };
 
 // Main App Component
-function App() {
-  const [columns, setColumns] = useState([]);
+const App = () => {
   const [cards, setCards] = useState([]);
-  const [loading, setLoading] = useState(true);
+  const [columns, setColumns] = useState([]);
   const [activeCard, setActiveCard] = useState(null);
-  const [isModalOpen, setIsModalOpen] = useState(false);
-  const [editingCard, setEditingCard] = useState(null);
-  const [newCardColumnId, setNewCardColumnId] = useState(null);
-  const [analytics, setAnalytics] = useState(null);
-  const [isDarkMode, setIsDarkMode] = useState(false);
+  const [showModal, setShowModal] = useState(false);
+  const [showAnalytics, setShowAnalytics] = useState(false);
+  const [loading, setLoading] = useState(true);
+  const [activeId, setActiveId] = useState(null);
+  const [darkMode, setDarkMode] = useState(false);
+  const [sidebarOpen, setSidebarOpen] = useState(false);
+  const [analytics, setAnalytics] = useState({});
   const [searchTerm, setSearchTerm] = useState("");
-  const [showFilters, setShowFilters] = useState(false);
-  const [dragOverColumn, setDragOverColumn] = useState(null);
+  const [filterPriority, setFilterPriority] = useState("");
+  const [communications, setCommunications] = useState([]);
+  const [activeTab, setActiveTab] = useState('kanban'); // 'kanban' or 'communications'
 
   const sensors = useSensors(
     useSensor(PointerSensor),
@@ -803,357 +741,580 @@ function App() {
     })
   );
 
-  // Initialize app
   useEffect(() => {
-    initializeApp();
+    loadData();
+    loadCommunications();
     
-    // Check for dark mode preference
-    const darkMode = localStorage.getItem('darkMode') === 'true';
-    setIsDarkMode(darkMode);
+    // Poll for communications updates
+    const interval = setInterval(loadCommunications, 10000);
+    return () => clearInterval(interval);
   }, []);
 
-  const initializeApp = async () => {
+  const loadData = async () => {
     try {
       setLoading(true);
-      
-      // Initialize default data
-      await axios.post(`${API}/initialize`);
-      
-      // Load data
-      await loadData();
-      
-      toast.success('🎉 CRM carregado com sucesso!', {
-        duration: 3000,
-        position: 'top-right',
-      });
+      const [boardsResponse, analyticsResponse] = await Promise.all([
+        axios.get(`${API}/boards`),
+        axios.get(`${API}/analytics/pipeline`)
+      ]);
+
+      if (boardsResponse.data.length === 0) {
+        await axios.post(`${API}/initialize`);
+        loadData();
+        return;
+      }
+
+      const board = boardsResponse.data[0];
+      const [columnsResponse, cardsResponse] = await Promise.all([
+        axios.get(`${API}/boards/${board.id}/columns`),
+        axios.get(`${API}/cards`)
+      ]);
+
+      setColumns(columnsResponse.data);
+      setCards(cardsResponse.data);
+      setAnalytics(analyticsResponse.data);
     } catch (error) {
-      console.error("Error initializing app:", error);
-      toast.error('❌ Erro ao carregar CRM', {
-        duration: 4000,
-        position: 'top-right',
-      });
+      console.error('Error loading data:', error);
+      toast.error('Erro ao carregar dados');
     } finally {
       setLoading(false);
     }
   };
 
-  const loadData = async () => {
+  const loadCommunications = async () => {
     try {
-      const [boardsResponse, cardsResponse, analyticsResponse] = await Promise.all([
-        axios.get(`${API}/boards`),
-        axios.get(`${API}/cards`),
-        axios.get(`${API}/analytics/pipeline`)
-      ]);
-
-      if (boardsResponse.data.length > 0) {
-        const boardId = boardsResponse.data[0].id;
-        const columnsResponse = await axios.get(`${API}/boards/${boardId}/columns`);
-        setColumns(columnsResponse.data);
-      }
-
-      setCards(cardsResponse.data);
-      setAnalytics(analyticsResponse.data);
+      const response = await axios.get(`${API}/communications`);
+      setCommunications(response.data || []);
     } catch (error) {
-      console.error("Error loading data:", error);
-      toast.error('❌ Erro ao carregar dados');
+      console.error('Error loading communications:', error);
     }
   };
 
-  const toggleDarkMode = () => {
-    const newDarkMode = !isDarkMode;
-    setIsDarkMode(newDarkMode);
-    localStorage.setItem('darkMode', newDarkMode.toString());
-    toast.success(`${newDarkMode ? '🌙' : '☀️'} Modo ${newDarkMode ? 'escuro' : 'claro'} ativado!`);
-  };
+  // Filter cards based on search and priority
+  const filteredCards = cards.filter(card => {
+    const matchesSearch = !searchTerm || 
+      card.title.toLowerCase().includes(searchTerm.toLowerCase()) ||
+      card.contact_name?.toLowerCase().includes(searchTerm.toLowerCase()) ||
+      card.description?.toLowerCase().includes(searchTerm.toLowerCase());
+    
+    const matchesPriority = !filterPriority || card.priority === filterPriority;
+    
+    return matchesSearch && matchesPriority;
+  });
 
   const handleDragStart = (event) => {
-    const { active } = event;
-    const card = cards.find(c => c.id === active.id);
-    setActiveCard(card);
-  };
-
-  const handleDragOver = (event) => {
-    const { over } = event;
-    if (over) {
-      const overColumn = columns.find(c => c.id === over.id) || 
-                        columns.find(c => cards.find(card => card.id === over.id && card.column_id === c.id));
-      setDragOverColumn(overColumn?.id || null);
-    }
+    setActiveId(event.active.id);
   };
 
   const handleDragEnd = async (event) => {
     const { active, over } = event;
-    setActiveCard(null);
-    setDragOverColumn(null);
+    setActiveId(null);
 
     if (!over) return;
 
-    const activeCard = cards.find(c => c.id === active.id);
-    const overColumn = columns.find(c => c.id === over.id) || 
-                      columns.find(c => cards.find(card => card.id === over.id && card.column_id === c.id));
+    const activeCard = cards.find(card => card.id === active.id);
+    const overColumn = columns.find(col => 
+      col.id === over.id || 
+      cards.find(card => card.id === over.id)?.column_id === col.id
+    );
 
     if (!activeCard || !overColumn) return;
 
     if (activeCard.column_id !== overColumn.id) {
       try {
-        // Move card to new column
         await axios.post(`${API}/cards/move`, {
           card_id: activeCard.id,
           destination_column_id: overColumn.id,
           position: 0
         });
-
-        // Show success toast
-        const columnNames = {
-          "Prospects 🎯": "Prospects",
-          "Contact Made 📞": "Contato Feito", 
-          "Proposal Sent 📄": "Proposta Enviada",
-          "Closed Won 🎉": "Fechado"
-        };
         
-        const fromColumn = columns.find(c => c.id === activeCard.column_id);
-        const toColumn = overColumn;
-        
-        toast.success(`🚀 ${activeCard.title} movido para ${columnNames[toColumn.title] || toColumn.title}!`, {
-          duration: 3000,
-          position: 'top-right',
-        });
-
-        // Reload data to reflect changes
-        await loadData();
+        toast.success('Card movido com sucesso!');
+        loadData();
       } catch (error) {
-        console.error("Error moving card:", error);
-        toast.error('❌ Erro ao mover card');
+        console.error('Error moving card:', error);
+        toast.error('Erro ao mover card');
       }
     }
   };
 
   const handleAddCard = (columnId) => {
-    setNewCardColumnId(columnId);
-    setEditingCard(null);
-    setIsModalOpen(true);
+    setActiveCard({
+      title: "",
+      description: "",
+      contact_name: "",
+      contact_email: "",
+      contact_phone: "",
+      estimated_value: 0,
+      priority: "medium",
+      assigned_to: "",
+      tags: [],
+      due_date: null,
+      column_id: columnId
+    });
+    setShowModal(true);
   };
 
   const handleEditCard = (card) => {
-    setEditingCard(card);
-    setNewCardColumnId(null);
-    setIsModalOpen(true);
+    setActiveCard(card);
+    setShowModal(true);
+  };
+
+  const handleDeleteCard = async (card) => {
+    if (!window.confirm('Tem certeza que deseja excluir este card?')) return;
+    
+    try {
+      await axios.delete(`${API}/cards/${card.id}`);
+      toast.success('Card excluído com sucesso!');
+      loadData();
+    } catch (error) {
+      console.error('Error deleting card:', error);
+      toast.error('Erro ao excluir card');
+    }
   };
 
   const handleSaveCard = async (cardData) => {
     try {
-      if (editingCard) {
-        // Update existing card
-        await axios.put(`${API}/cards/${editingCard.id}`, cardData);
-        toast.success('✏️ Card atualizado com sucesso!');
+      if (cardData.id) {
+        await axios.put(`${API}/cards/${cardData.id}`, cardData);
+        toast.success('Card atualizado com sucesso!');
       } else {
-        // Create new card
         await axios.post(`${API}/cards`, cardData);
-        toast.success('🎉 Novo card criado!');
+        toast.success('Card criado com sucesso!');
       }
-
-      setIsModalOpen(false);
-      setEditingCard(null);
-      setNewCardColumnId(null);
-      await loadData();
+      
+      setShowModal(false);
+      setActiveCard(null);
+      loadData();
     } catch (error) {
-      console.error("Error saving card:", error);
-      toast.error('❌ Erro ao salvar card');
+      console.error('Error saving card:', error);
+      toast.error('Erro ao salvar card');
     }
   };
 
-  const handleDeleteCard = async (cardId) => {
-    if (window.confirm("Tem certeza que deseja deletar este card?")) {
-      try {
-        await axios.delete(`${API}/cards/${cardId}`);
-        toast.success('🗑️ Card deletado com sucesso!');
-        await loadData();
-      } catch (error) {
-        console.error("Error deleting card:", error);
-        toast.error('❌ Erro ao deletar card');
-      }
-    }
-  };
-
-  // Filter cards based on search term
-  const filteredCards = cards.filter(card => 
-    card.title.toLowerCase().includes(searchTerm.toLowerCase()) ||
-    (card.contact_name && card.contact_name.toLowerCase().includes(searchTerm.toLowerCase())) ||
-    (card.description && card.description.toLowerCase().includes(searchTerm.toLowerCase()))
-  );
+  const tabs = [
+    { id: 'kanban', name: 'Kanban', icon: Bars3Icon },
+    { id: 'communications', name: 'Comunicação', icon: ChatBubbleLeftRightIcon },
+    { id: 'analytics', name: 'Analytics', icon: ChartBarIcon },
+  ];
 
   if (loading) {
     return (
-      <div className={`min-h-screen ${isDarkMode ? 'bg-gray-900' : 'bg-gradient-to-br from-blue-50 via-purple-50 to-pink-50'} flex items-center justify-center`}>
-        <motion.div
-          initial={{ opacity: 0, scale: 0.8 }}
-          animate={{ opacity: 1, scale: 1 }}
-          className="text-center"
-        >
-          <motion.div
-            animate={{ rotate: 360 }}
-            transition={{ duration: 2, repeat: Infinity, ease: "linear" }}
-            className="w-16 h-16 border-4 border-blue-500 border-t-transparent rounded-full mx-auto mb-4"
-          />
-          <p className={`text-xl font-semibold ${isDarkMode ? 'text-white' : 'text-gray-700'}`}>
-            🚀 Carregando seu CRM...
-          </p>
-        </motion.div>
+      <div className="min-h-screen bg-gradient-to-br from-indigo-50 via-white to-cyan-50 flex items-center justify-center">
+        <div className="text-center">
+          <div className="w-16 h-16 border-4 border-blue-600 border-t-transparent rounded-full animate-spin mx-auto mb-4"></div>
+          <p className="text-gray-600">Carregando CRM...</p>
+        </div>
       </div>
     );
   }
 
   return (
-    <div className={`min-h-screen transition-all duration-500 ${isDarkMode ? 'bg-gray-900' : 'bg-gradient-to-br from-blue-50 via-purple-50 to-pink-50'}`}>
-      <Toaster
-        position="top-right"
-        toastOptions={{
-          duration: 3000,
-          style: {
-            background: isDarkMode ? '#374151' : '#ffffff',
-            color: isDarkMode ? '#f9fafb' : '#111827',
-            borderRadius: '12px',
-            border: isDarkMode ? '1px solid #4b5563' : '1px solid #e5e7eb',
-            boxShadow: '0 10px 15px -3px rgba(0, 0, 0, 0.1), 0 4px 6px -2px rgba(0, 0, 0, 0.05)',
-          },
-        }}
-      />
-      
-      <div className="p-6">
-        {/* Header */}
-        <motion.div
-          initial={{ opacity: 0, y: -20 }}
-          animate={{ opacity: 1, y: 0 }}
-          className="mb-8"
-        >
-          <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-6">
-            <div>
-              <h1 className={`text-4xl font-bold bg-gradient-to-r from-blue-600 to-purple-600 bg-clip-text text-transparent mb-2`}>
-                🎯 Sales Pipeline CRM
-              </h1>
-              <p className={`text-lg ${isDarkMode ? 'text-gray-300' : 'text-gray-600'} font-medium`}>
-                Gerencie seus leads e negócios através do funil de vendas
-              </p>
-            </div>
-            
+    <div className={`min-h-screen transition-colors duration-300 ${
+      darkMode ? 'bg-gray-900 text-white' : 'bg-gradient-to-br from-indigo-50 via-white to-cyan-50'
+    }`}>
+      {/* Header */}
+      <header className={`sticky top-0 z-50 ${
+        darkMode ? 'bg-gray-800 border-gray-700' : 'bg-white/80 border-gray-200'
+      } backdrop-blur-sm border-b`}>
+        <div className="px-6 py-4">
+          <div className="flex items-center justify-between">
             <div className="flex items-center gap-4">
-              {/* Search Bar */}
-              <div className="relative">
-                <MagnifyingGlassIcon className={`absolute left-3 top-1/2 transform -translate-y-1/2 w-5 h-5 ${isDarkMode ? 'text-gray-400' : 'text-gray-500'}`} />
-                <input
-                  type="text"
-                  placeholder="Buscar cards..."
-                  value={searchTerm}
-                  onChange={(e) => setSearchTerm(e.target.value)}
-                  className={`
-                    pl-10 pr-4 py-3 w-64 rounded-xl border shadow-lg transition-all focus:ring-4 focus:ring-blue-500/20 focus:border-blue-500
-                    ${isDarkMode ? 'bg-gray-800 border-gray-600 text-white' : 'bg-white border-gray-300 text-gray-900'}
-                  `}
-                />
-              </div>
+              <h1 className="text-2xl font-bold bg-gradient-to-r from-blue-600 to-purple-600 bg-clip-text text-transparent">
+                CRM Omnichannel
+              </h1>
               
+              {/* Tab Navigation */}
+              <nav className="flex space-x-4">
+                {tabs.map(tab => (
+                  <button
+                    key={tab.id}
+                    onClick={() => setActiveTab(tab.id)}
+                    className={`flex items-center gap-2 px-4 py-2 rounded-lg font-medium text-sm transition-colors ${
+                      activeTab === tab.id
+                        ? 'bg-blue-100 text-blue-700'
+                        : darkMode 
+                          ? 'text-gray-300 hover:text-white hover:bg-gray-700'
+                          : 'text-gray-600 hover:text-gray-900 hover:bg-gray-100'
+                    }`}
+                  >
+                    <tab.icon className="w-5 h-5" />
+                    {tab.name}
+                  </button>
+                ))}
+              </nav>
+            </div>
+
+            <div className="flex items-center gap-4">
+              {activeTab === 'kanban' && (
+                <>
+                  {/* Search */}
+                  <div className="relative">
+                    <MagnifyingGlassIcon className="w-5 h-5 absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400" />
+                    <input
+                      type="text"
+                      placeholder="Buscar cards..."
+                      value={searchTerm}
+                      onChange={(e) => setSearchTerm(e.target.value)}
+                      className="pl-10 pr-4 py-2 border border-gray-200 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                    />
+                  </div>
+
+                  {/* Priority Filter */}
+                  <select
+                    value={filterPriority}
+                    onChange={(e) => setFilterPriority(e.target.value)}
+                    className="px-3 py-2 border border-gray-200 rounded-lg text-sm focus:ring-2 focus:ring-blue-500"
+                  >
+                    <option value="">Todas Prioridades</option>
+                    <option value="high">Alta</option>
+                    <option value="medium">Média</option>
+                    <option value="low">Baixa</option>
+                  </select>
+                </>
+              )}
+
               {/* Dark Mode Toggle */}
-              <motion.button
-                whileHover={{ scale: 1.05 }}
-                whileTap={{ scale: 0.95 }}
-                onClick={toggleDarkMode}
-                className={`p-3 rounded-xl border shadow-lg transition-all ${isDarkMode ? 'bg-gray-800 border-gray-600 text-yellow-400' : 'bg-white border-gray-300 text-gray-600'}`}
+              <button
+                onClick={() => setDarkMode(!darkMode)}
+                className={`p-2 rounded-lg transition-colors ${
+                  darkMode 
+                    ? 'bg-gray-700 text-yellow-400 hover:bg-gray-600'
+                    : 'bg-gray-100 text-gray-600 hover:bg-gray-200'
+                }`}
               >
-                {isDarkMode ? <SunIcon className="w-5 h-5" /> : <MoonIcon className="w-5 h-5" />}
-              </motion.button>
-              
-              {/* Filters Toggle */}
-              <motion.button
-                whileHover={{ scale: 1.05 }}
-                whileTap={{ scale: 0.95 }}
-                onClick={() => setShowFilters(!showFilters)}
-                className={`p-3 rounded-xl border shadow-lg transition-all ${isDarkMode ? 'bg-gray-800 border-gray-600 text-gray-300' : 'bg-white border-gray-300 text-gray-600'}`}
-              >
-                <FunnelIcon className="w-5 h-5" />
-              </motion.button>
+                {darkMode ? <SunIcon className="w-5 h-5" /> : <MoonIcon className="w-5 h-5" />}
+              </button>
             </div>
           </div>
-        </motion.div>
+        </div>
+      </header>
 
-        {/* Analytics Dashboard */}
-        <AnalyticsDashboard analytics={analytics} isDarkMode={isDarkMode} />
+      {/* Main Content */}
+      <main className="p-6">
+        {activeTab === 'kanban' && (
+          <DndContext
+            sensors={sensors}
+            collisionDetection={closestCorners}
+            onDragStart={handleDragStart}
+            onDragEnd={handleDragEnd}
+          >
+            <div className="flex gap-6 overflow-x-auto pb-6">
+              {columns.map(column => {
+                const columnCards = filteredCards.filter(card => card.column_id === column.id);
+                return (
+                  <Column
+                    key={column.id}
+                    column={column}
+                    cards={columnCards}
+                    communications={communications}
+                    onAddCard={handleAddCard}
+                    onEditCard={handleEditCard}
+                    onDeleteCard={handleDeleteCard}
+                  />
+                );
+              })}
+            </div>
 
-        {/* Kanban Board */}
-        <DndContext
-          sensors={sensors}
-          collisionDetection={closestCorners}
-          onDragStart={handleDragStart}
-          onDragOver={handleDragOver}
-          onDragEnd={handleDragEnd}
-        >
-          <div className="flex gap-8 overflow-x-auto pb-6 scrollbar-thin scrollbar-thumb-gray-300 dark:scrollbar-thumb-gray-600">
-            {columns.map((column) => (
-              <KanbanColumn
-                key={column.id}
-                column={column}
-                cards={filteredCards}
-                onAddCard={handleAddCard}
-                onEditCard={handleEditCard}
-                onDeleteCard={handleDeleteCard}
-                isDarkMode={isDarkMode}
-                isDragOver={dragOverColumn === column.id}
-              />
-            ))}
-          </div>
+            <DragOverlay>
+              {activeId ? (
+                <Card
+                  card={cards.find(card => card.id === activeId)}
+                  communications={communications}
+                  onEdit={() => {}}
+                  onDelete={() => {}}
+                />
+              ) : null}
+            </DragOverlay>
+          </DndContext>
+        )}
 
-          <DragOverlay>
-            {activeCard ? (
-              <motion.div
-                initial={{ rotate: -5, scale: 1.05 }}
-                animate={{ rotate: 5, scale: 1.05 }}
-                className={`
-                  ${isDarkMode ? 'bg-gray-800 border-gray-700' : 'bg-white border-gray-200'}
-                  rounded-2xl p-5 shadow-2xl border cursor-grabbing transform rotate-3
-                `}
-              >
-                <h3 className={`font-bold ${isDarkMode ? 'text-white' : 'text-gray-900'} mb-2`}>
-                  {activeCard.title}
-                </h3>
-                <p className={`${isDarkMode ? 'text-gray-300' : 'text-gray-600'} text-sm`}>
-                  {activeCard.description}
-                </p>
-                <div className="flex justify-between items-center mt-3">
-                  <PriorityBadge priority={activeCard.priority} />
-                  {activeCard.estimated_value > 0 && (
-                    <span className="font-bold text-green-600 dark:text-green-400 text-sm">
-                      {new Intl.NumberFormat('pt-BR', {
-                        style: 'currency',
-                        currency: 'BRL',
-                        minimumFractionDigits: 0,
-                      }).format(activeCard.estimated_value)}
-                    </span>
-                  )}
+        {activeTab === 'communications' && <CommunicationsTab />}
+
+        {activeTab === 'analytics' && (
+          <div className="grid grid-cols-1 lg:grid-cols-4 gap-6">
+            {/* Analytics content - keeping existing analytics */}
+            <div className="bg-white rounded-xl shadow-sm border p-6">
+              <div className="flex items-center justify-between mb-4">
+                <h3 className="text-lg font-semibold text-gray-800">Total de Cards</h3>
+                <div className="p-2 bg-blue-100 rounded-lg">
+                  <Bars3Icon className="w-6 h-6 text-blue-600" />
                 </div>
-              </motion.div>
-            ) : null}
-          </DragOverlay>
-        </DndContext>
+              </div>
+              <div className="text-3xl font-bold text-gray-900 mb-2">
+                {analytics.total_cards || 0}
+              </div>
+              <div className="text-sm text-gray-600">
+                Leads no pipeline
+              </div>
+            </div>
 
-        {/* Card Modal */}
-        <AnimatePresence>
-          {isModalOpen && (
-            <CardModal
-              card={editingCard}
-              isOpen={isModalOpen}
-              onClose={() => {
-                setIsModalOpen(false);
-                setEditingCard(null);
-                setNewCardColumnId(null);
-              }}
-              onSave={handleSaveCard}
-              columnId={newCardColumnId}
-              isDarkMode={isDarkMode}
-            />
-          )}
-        </AnimatePresence>
-      </div>
+            <div className="bg-white rounded-xl shadow-sm border p-6">
+              <div className="flex items-center justify-between mb-4">
+                <h3 className="text-lg font-semibold text-gray-800">Valor do Pipeline</h3>
+                <div className="p-2 bg-green-100 rounded-lg">
+                  <CurrencyDollarIcon className="w-6 h-6 text-green-600" />
+                </div>
+              </div>
+              <div className="text-3xl font-bold text-gray-900 mb-2">
+                R$ {(analytics.total_pipeline_value || 0).toLocaleString('pt-BR')}
+              </div>
+              <div className="text-sm text-gray-600">
+                Valor total estimado
+              </div>
+            </div>
+
+            <div className="bg-white rounded-xl shadow-sm border p-6">
+              <div className="flex items-center justify-between mb-4">
+                <h3 className="text-lg font-semibold text-gray-800">Mensagens</h3>
+                <div className="p-2 bg-purple-100 rounded-lg">
+                  <ChatBubbleLeftRightIcon className="w-6 h-6 text-purple-600" />
+                </div>
+              </div>
+              <div className="text-3xl font-bold text-gray-900 mb-2">
+                {analytics.communication_stats?.total_messages || 0}
+              </div>
+              <div className="text-sm text-gray-600">
+                Total de conversas
+              </div>
+            </div>
+
+            <div className="bg-white rounded-xl shadow-sm border p-6">
+              <div className="flex items-center justify-between mb-4">
+                <h3 className="text-lg font-semibold text-gray-800">Conversas Ativas</h3>
+                <div className="p-2 bg-orange-100 rounded-lg">
+                  <SignalIcon className="w-6 h-6 text-orange-600" />
+                </div>
+              </div>
+              <div className="text-3xl font-bold text-gray-900 mb-2">
+                {analytics.communication_stats?.active_conversations || 0}
+              </div>
+              <div className="text-sm text-gray-600">
+                Últimos 7 dias
+              </div>
+            </div>
+          </div>
+        )}
+      </main>
+
+      {/* Card Modal */}
+      {showModal && activeCard && (
+        <CardModal
+          card={activeCard}
+          onSave={handleSaveCard}
+          onClose={() => {
+            setShowModal(false);
+            setActiveCard(null);
+          }}
+        />
+      )}
+
+      {/* Toast Container */}
+      <Toaster position="top-right" />
     </div>
   );
-}
+};
+
+// Card Modal Component (Enhanced)
+const CardModal = ({ card, onSave, onClose }) => {
+  const [formData, setFormData] = useState(card);
+  const [loading, setLoading] = useState(false);
+
+  const handleSubmit = async (e) => {
+    e.preventDefault();
+    setLoading(true);
+    try {
+      await onSave(formData);
+    } catch (error) {
+      console.error('Error saving card:', error);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleChange = (field, value) => {
+    setFormData(prev => ({
+      ...prev,
+      [field]: value
+    }));
+  };
+
+  return (
+    <div className="fixed inset-0 bg-black/50 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+      <motion.div
+        initial={{ opacity: 0, scale: 0.9 }}
+        animate={{ opacity: 1, scale: 1 }}
+        exit={{ opacity: 0, scale: 0.9 }}
+        className="bg-white rounded-xl shadow-2xl max-w-2xl w-full max-h-[90vh] overflow-y-auto"
+      >
+        <form onSubmit={handleSubmit}>
+          <div className="p-6 border-b border-gray-200">
+            <div className="flex items-center justify-between">
+              <h2 className="text-xl font-semibold text-gray-900">
+                {card.id ? 'Editar Card' : 'Novo Card'}
+              </h2>
+              <button
+                type="button"
+                onClick={onClose}
+                className="p-2 hover:bg-gray-100 rounded-lg transition-colors"
+              >
+                <XMarkIcon className="w-5 h-5 text-gray-400" />
+              </button>
+            </div>
+          </div>
+
+          <div className="p-6 space-y-6">
+            {/* Title */}
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-2">
+                Título *
+              </label>
+              <input
+                type="text"
+                required
+                value={formData.title || ''}
+                onChange={(e) => handleChange('title', e.target.value)}
+                className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                placeholder="Nome do lead ou empresa"
+              />
+            </div>
+
+            {/* Description */}
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-2">
+                Descrição
+              </label>
+              <textarea
+                value={formData.description || ''}
+                onChange={(e) => handleChange('description', e.target.value)}
+                rows={3}
+                className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                placeholder="Detalhes sobre o lead ou oportunidade"
+              />
+            </div>
+
+            {/* Contact Information */}
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-2">
+                  Nome do Contato
+                </label>
+                <input
+                  type="text"
+                  value={formData.contact_name || ''}
+                  onChange={(e) => handleChange('contact_name', e.target.value)}
+                  className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                  placeholder="Nome da pessoa de contato"
+                />
+              </div>
+
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-2">
+                  Telefone
+                </label>
+                <input
+                  type="tel"
+                  value={formData.contact_phone || ''}
+                  onChange={(e) => handleChange('contact_phone', e.target.value)}
+                  className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                  placeholder="(11) 99999-9999"
+                />
+              </div>
+
+              <div className="md:col-span-2">
+                <label className="block text-sm font-medium text-gray-700 mb-2">
+                  Email
+                </label>
+                <input
+                  type="email"
+                  value={formData.contact_email || ''}
+                  onChange={(e) => handleChange('contact_email', e.target.value)}
+                  className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                  placeholder="contato@empresa.com"
+                />
+              </div>
+            </div>
+
+            {/* Value and Priority */}
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-2">
+                  Valor Estimado (R$)
+                </label>
+                <input
+                  type="number"
+                  min="0"
+                  step="0.01"
+                  value={formData.estimated_value || ''}
+                  onChange={(e) => handleChange('estimated_value', parseFloat(e.target.value) || 0)}
+                  className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                  placeholder="0,00"
+                />
+              </div>
+
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-2">
+                  Prioridade
+                </label>
+                <select
+                  value={formData.priority || 'medium'}
+                  onChange={(e) => handleChange('priority', e.target.value)}
+                  className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                >
+                  <option value="low">Baixa</option>
+                  <option value="medium">Média</option>
+                  <option value="high">Alta</option>
+                </select>
+              </div>
+            </div>
+
+            {/* Tags */}
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-2">
+                Tags (separadas por vírgula)
+              </label>
+              <input
+                type="text"
+                value={formData.tags?.join(', ') || ''}
+                onChange={(e) => handleChange('tags', e.target.value.split(',').map(tag => tag.trim()).filter(Boolean))}
+                className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                placeholder="cliente vip, urgente, follow-up"
+              />
+            </div>
+
+            {/* Due Date */}
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-2">
+                Data de Vencimento
+              </label>
+              <input
+                type="datetime-local"
+                value={formData.due_date ? new Date(formData.due_date).toISOString().slice(0, 16) : ''}
+                onChange={(e) => handleChange('due_date', e.target.value ? new Date(e.target.value).toISOString() : null)}
+                className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+              />
+            </div>
+          </div>
+
+          <div className="p-6 border-t border-gray-200 flex items-center justify-end gap-3">
+            <button
+              type="button"
+              onClick={onClose}
+              className="px-4 py-2 text-gray-700 hover:text-gray-900 transition-colors"
+            >
+              Cancelar
+            </button>
+            <button
+              type="submit"
+              disabled={loading}
+              className="px-6 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50 transition-colors"
+            >
+              {loading ? 'Salvando...' : 'Salvar'}
+            </button>
+          </div>
+        </form>
+      </motion.div>
+    </div>
+  );
+};
 
 export default App;
